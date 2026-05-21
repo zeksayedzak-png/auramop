@@ -1,210 +1,181 @@
 --[[
-    RED TEAM AUDIT TOOL - HITBOX & FREEZE V8.2
-    OPTIMIZED FOR: DELTA EXECUTOR (MOBILE)
-    FUNCTION: SELECT ONE -> FREEZE ALL SIMILAR + AUTO-LOCK
+    MOB MANAGER V5 - (GHOST & NOCLIP MODE)
+    ✅ نظام تأكيد الاختيار (Confirm System)
+    ✅ وضع الاختراق: يجعل الموبات تسقط عبر الأرض وتخترق الجدران
+    ✅ منع اختيار الأشياء خلف الواجهة
 ]]--
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
 
--- جداول التحكم
-local systemActive = false
-local currentSize = 20
-local lockedMobNames = {} -- لتخزين أسماء الموبات التي نريد تجميدها دائماً
+-- متغيرات النظام
+local savedMobNames = {} 
+local selectionMode = false
+local tempSelectedMob = nil 
 
--- دالة إيجاد الموديل (تأكد أنه عدو)
-local function getTargetModel(part)
-    local current = part
-    while current and current ~= workspace do
-        if current:IsA("Model") and (current:FindFirstChildOfClass("Humanoid") or current:FindFirstChild("Head")) then
-            return current
-        end
-        current = current.Parent
+-- وظيفة للحصول على مسار الشيء
+local function getFullPath(obj)
+    local path = obj.Name
+    local parent = obj.Parent
+    while parent and parent ~= game do
+        path = parent.Name .. "." .. path
+        parent = parent.Parent
     end
-    return nil
+    return path
 end
 
--- دالة تطبيق التجميد والهيتبوكس
-local function applyEffects(model)
-    if not model then return end
-    local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso") or model:FindFirstChild("PrimaryPart")
-    
-    if root then
-        pcall(function()
-            root.Size = Vector3.new(currentSize, currentSize, currentSize)
-            root.Transparency = 0.7
-            root.Color = Color3.fromRGB(255, 0, 0)
-            root.CanCollide = false
-            root.Anchored = true -- تجميد الموب في مكانه
-        end)
-    end
-end
+-- صندوق التحديد المرئي
+local selectionBox = Instance.new("SelectionBox")
+selectionBox.Color3 = Color3.fromRGB(255, 0, 0) -- لون أحمر لوضع الاختراق
+selectionBox.LineThickness = 0.2
+selectionBox.Parent = workspace
 
--- ==================== بناء الواجهة (UI) ====================
+-- ==================== بناء الواجهة ====================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "SovereignSystemV8"
-screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Name = "MobGhostManagerV5"
 screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 300, 0, 350)
-frame.Position = UDim2.new(0.1, 0, 0.2, 0)
-frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-frame.BorderSizePixel = 0
-frame.Active = true
-frame.Draggable = true
-frame.Parent = screenGui
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 350, 0, 220)
+mainFrame.Position = UDim2.new(0.5, -175, 0.2, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 10, 10)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true 
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
 
 local title = Instance.new("TextLabel")
-title.Text = "FREEZE AUDITOR V8.2"
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Text = "👻 Mob Ghost Manager V5"
+title.Size = UDim2.new(1, 0, 0, 30)
 title.TextColor3 = Color3.fromRGB(255, 50, 50)
 title.BackgroundTransparency = 1
-title.Font = Enum.Font.Code
-title.TextSize = 18
-title.Parent = frame
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Text = "Status: Idle (Scanner Off)"
-statusLabel.Size = UDim2.new(0.9, 0, 0, 50)
-statusLabel.Position = UDim2.new(0.05, 0, 0.15, 0)
-statusLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.TextWrapped = true
-statusLabel.Parent = frame
+local infoLabel = Instance.new("TextLabel")
+infoLabel.Text = "اختر الموبات التي تريد جعلها تخترق الأرض..."
+infoLabel.Size = UDim2.new(0.9, 0, 0, 40)
+infoLabel.Position = UDim2.new(0.05, 0, 0.15, 0)
+infoLabel.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
+infoLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
+infoLabel.TextSize = 10
+infoLabel.TextWrapped = true
+infoLabel.Font = Enum.Font.Code
+infoLabel.Parent = mainFrame
+Instance.new("UICorner", infoLabel)
 
-local scanBtn = Instance.new("TextButton")
-scanBtn.Text = "ACTIVATE SCANNER"
-scanBtn.Size = UDim2.new(0.9, 0, 0, 40)
-scanBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
-scanBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-scanBtn.TextColor3 = Color3.white
-scanBtn.Parent = frame
-Instance.new("UICorner", scanBtn)
+-- ==================== الأزرار ====================
+local function createBtn(text, pos, size, color)
+    local btn = Instance.new("TextButton")
+    btn.Text = text
+    btn.Size = size
+    btn.Position = pos
+    btn.BackgroundColor3 = color
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.Parent = mainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
 
--- السلايدر
-local sliderFrame = Instance.new("Frame")
-sliderFrame.Size = UDim2.new(0.9, 0, 0, 10)
-sliderFrame.Position = UDim2.new(0.05, 0, 0.55, 0)
-sliderFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-sliderFrame.Parent = frame
+local selectBtn = createBtn("🔍 وضع التحديد: OFF", UDim2.new(0.05, 0, 0.38, 0), UDim2.new(0.9, 0, 0, 35), Color3.fromRGB(180, 40, 40))
 
-local sliderBar = Instance.new("Frame")
-sliderBar.Size = UDim2.new(0.1, 0, 1, 0)
-sliderBar.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-sliderBar.Parent = sliderFrame
-
-local sizeText = Instance.new("TextLabel")
-sizeText.Text = "Hitbox Size: 20"
-sizeText.Position = UDim2.new(0, 0, -2.5, 0)
-sizeText.Size = UDim2.new(1, 0, 2, 0)
-sizeText.BackgroundTransparency = 1
-sizeText.TextColor3 = Color3.white
-sizeText.Parent = sliderFrame
-
-local confirmBtn = Instance.new("TextButton")
-confirmBtn.Text = "CONFIRM & FREEZE ALL"
-confirmBtn.Size = UDim2.new(0.9, 0, 0, 50)
-confirmBtn.Position = UDim2.new(0.05, 0, 0.75, 0)
-confirmBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-confirmBtn.TextColor3 = Color3.white
+local confirmBtn = createBtn("✅ تأكيد الإضافة للقائمة", UDim2.new(0.05, 0, 0.58, 0), UDim2.new(0.9, 0, 0, 35), Color3.fromRGB(0, 120, 255))
 confirmBtn.Visible = false
-confirmBtn.Parent = frame
-Instance.new("UICorner", confirmBtn)
 
--- ==================== المنطق التشغيلي ====================
+local ghostBtn = createBtn("💀 تفعيل الاختراق (سقوط)", UDim2.new(0.05, 0, 0.77, 0), UDim2.new(0.43, 0, 0, 35), Color3.fromRGB(150, 0, 0))
+local clearBtn = createBtn("🗑️ مسح القائمة", UDim2.new(0.52, 0, 0.77, 0), UDim2.new(0.43, 0, 0, 35), Color3.fromRGB(80, 80, 80))
 
-local selectedName = ""
+-- ==================== المنطق البرمجي ====================
 
--- 1. تفعيل السكنر
-scanBtn.MouseButton1Click:Connect(function()
-    systemActive = not systemActive
-    scanBtn.Text = systemActive and "SCANNING..." or "ACTIVATE SCANNER"
-    scanBtn.BackgroundColor3 = systemActive and Color3.fromRGB(0, 100, 0) or Color3.fromRGB(45, 45, 45)
-    statusLabel.Text = systemActive and "Click on a Mob to select it" or "System Idle"
-end)
-
--- 2. منطق السلايدر
-sliderFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        local function update()
-            local inputPos = input.Position.X
-            local framePos = sliderFrame.AbsolutePosition.X
-            local frameSize = sliderFrame.AbsoluteSize.X
-            local percent = math.clamp((inputPos - framePos) / frameSize, 0, 1)
-            sliderBar.Size = UDim2.new(percent, 0, 1, 0)
-            currentSize = math.floor(percent * 200)
-            if currentSize < 1 then currentSize = 1 end
-            sizeText.Text = "Hitbox Size: " .. currentSize
-        end
-        update()
-        local moveConnection = UserInputService.InputChanged:Connect(function(moveInput)
-            if moveInput.UserInputType == Enum.UserInputType.MouseButton1 or moveInput.UserInputType == Enum.UserInputType.Touch then
-                local inputPos = moveInput.Position.X
-                local framePos = sliderFrame.AbsolutePosition.X
-                local frameSize = sliderFrame.AbsoluteSize.X
-                local percent = math.clamp((inputPos - framePos) / frameSize, 0, 1)
-                sliderBar.Size = UDim2.new(percent, 0, 1, 0)
-                currentSize = math.floor(percent * 200)
-                if currentSize < 1 then currentSize = 1 end
-                sizeText.Text = "Hitbox Size: " .. currentSize
-            end
-        end)
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                moveConnection:Disconnect()
-            end
-        end)
-    end
-end)
-
--- 3. تحديد الموب (باللمس أو الضغط)
-mouse.Button1Down:Connect(function()
-    if not systemActive then return end
+-- 1. اختيار الموب
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
     
-    local target = mouse.Target
-    if target then
-        -- التأكد أن الهدف ليس خلف اللاعب (Visible check)
-        local _, onScreen = camera:WorldToViewportPoint(target.Position)
-        if not onScreen then return end
+    if selectionMode and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+        local unitRay = camera:ScreenPointToRay(input.Position.X, input.Position.Y)
+        local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000)
         
-        local model = getTargetModel(target)
-        if model then
-            selectedName = model.Name
-            statusLabel.Text = "TARGET FOUND: " .. selectedName .. "\nClick Confirm to freeze all of them."
-            confirmBtn.Visible = true
-        end
-    end
-end)
-
--- 4. تأكيد التجميد (تجميد الكل + القائمة التلقائية)
-confirmBtn.MouseButton1Click:Connect(function()
-    if selectedName ~= "" then
-        if not table.find(lockedMobNames, selectedName) then
-            table.insert(lockedMobNames, selectedName)
-        end
-        statusLabel.Text = "SYSTEM LOCKED ON: " .. selectedName .. "\nFreezing all existing and future spawns."
-        confirmBtn.Visible = false
-        systemActive = false
-        scanBtn.Text = "SYSTEM ACTIVE"
-    end
-end)
-
--- 5. حلقة التحديث المستمر (Auto-Freeze)
-RunService.RenderStepped:Connect(function()
-    if #lockedMobNames > 0 then
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and table.find(lockedMobNames, obj.Name) then
-                applyEffects(obj)
+        if raycastResult and raycastResult.Instance then
+            local model = raycastResult.Instance:FindFirstAncestorOfClass("Model")
+            if model and model:FindFirstChildOfClass("Humanoid") then
+                tempSelectedMob = model
+                selectionBox.Adornee = model
+                infoLabel.Text = "الموب المختار: " .. model.Name
+                confirmBtn.Visible = true
+                confirmBtn.Text = "✅ إضافة [ " .. model.Name .. " ]"
             end
         end
     end
 end)
 
--- رسالة ترحيبية في الكونسول
-print("Sovereign Hitbox V8.2 Loaded - Ready for Delta")
+-- 2. تأكيد الإضافة
+confirmBtn.MouseButton1Click:Connect(function()
+    if tempSelectedMob then
+        if not table.find(savedMobNames, tempSelectedMob.Name) then
+            table.insert(savedMobNames, tempSelectedMob.Name)
+            infoLabel.Text = "✅ تمت إضافة النوع " .. tempSelectedMob.Name .. " للقائمة"
+        end
+        confirmBtn.Visible = false
+        selectionBox.Adornee = nil
+        tempSelectedMob = nil
+    end
+end)
+
+-- 3. تبديل وضع التحديد
+selectBtn.MouseButton1Click:Connect(function()
+    selectionMode = not selectionMode
+    selectBtn.Text = selectionMode and "🔍 وضع التحديد: ON" or "🔍 وضع التحديد: OFF"
+    selectBtn.BackgroundColor3 = selectionMode and Color3.fromRGB(40, 180, 40) or Color3.fromRGB(180, 40, 40)
+    if not selectionMode then 
+        confirmBtn.Visible = false 
+        selectionBox.Adornee = nil
+    end
+end)
+
+-- 4. تفعيل وضع الاختراق (Ghost Mode)
+ghostBtn.MouseButton1Click:Connect(function()
+    if #savedMobNames == 0 then
+        infoLabel.Text = "❌ أضف موباً واحداً على الأقل!"
+        return
+    end
+
+    local count = 0
+    for _, item in pairs(workspace:GetDescendants()) do
+        if item:IsA("Model") and table.find(savedMobNames, item.Name) then
+            -- جعل كل الأجزاء غير قابلة للاصطدام
+            for _, part in pairs(item:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                    part.CanTouch = false
+                    part.CanQuery = false
+                end
+            end
+            
+            -- تعطيل توازن الهيومانويد ليتمكن من السقوط عبر الأرض
+            local hum = item:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum.PlatformStand = true
+            end
+            
+            count = count + 1
+        end
+    end
+    infoLabel.Text = "💀 " .. count .. " موب أصبحوا أشباحاً الآن!"
+end)
+
+-- 5. مسح القائمة
+clearBtn.MouseButton1Click:Connect(function()
+    savedMobNames = {}
+    infoLabel.Text = "🗑️ تم مسح القائمة"
+end)
+
+-- زر إغلاق
+local close = createBtn("X", UDim2.new(1, -25, 0, 5), UDim2.new(0, 20, 0, 20), Color3.fromRGB(255, 50, 50))
+close.MouseButton1Click:Connect(function() screenGui:Destroy() end)
